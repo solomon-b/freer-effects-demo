@@ -59,7 +59,9 @@ data UserModel a where
   GetUser :: UserId -> UserModel User
   UpdateUser :: UserId -> (User -> User) -> UserModel ()
 
-runUserModel :: (Member IO r) => Eff (UserModel ': r) v -> Eff r v
+newtype UserModelError = UserModelError String
+
+runUserModel :: (Member IO r, Member (Exc UserModelError) r) => Eff (UserModel ': r) v -> Eff r v
 runUserModel = simpleRelay $ \case
   GetUser uid -> send $ getUserIO uid
   UpdateUser uid f -> send $ updateUserIO uid f
