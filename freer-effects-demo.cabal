@@ -22,5 +22,6 @@ executable freer-effects-demo
     -- other-extensions:
     build-depends:  , base ^>=4.18.1.0
                     , freer-effects
+                    , oops
     hs-source-dirs:   app
     default-language: Haskell2010

@@ -9,7 +9,6 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE InstanceSigs #-}
 
 module Main where
 
@@ -17,6 +16,7 @@ module Main where
 
 import Control.Monad.Freer
 import Control.Monad.Freer.Exception
+import Data.Variant
 
 --------------------------------------------------------------------------------
 
@@ -24,7 +24,10 @@ main :: IO ()
 main = do
   result <- interpreter runProgram
   case result of
-    Left _err -> print "error"
+    Left err ->
+      case toEithers err of
+        Left e -> print e
+        Right e -> print e
     Right _ -> pure ()
 
 type Errors = '[BlogPostError, UserModelError]
@@ -78,6 +81,7 @@ data UserModel a where
   UpdateUser :: UserId -> (User -> User) -> UserModel ()
 
 newtype UserModelError = UserModelError String
+  deriving Show
 
 runUserModel :: (Member IO r, Member (Exc UserModelError) r) => Eff (UserModel ': r) v -> Eff r v
 runUserModel = simpleRelay $ \case
@@ -144,31 +148,31 @@ mapError f = simpleRelay $ \(Exc err) -> throwError (f err)
 injectError :: forall e es r a . (Member (Exc (Variant es)) r, CouldBe es e) => Eff (Exc e : r) a -> Eff r a
 injectError = mapError (throw :: e -> Variant es)
 
-data Variant xs where
-  Here  :: x -> Variant (x : xs)
-  There :: Variant xs -> Variant (x : xs)
+-- data Variant xs where
+--   Here  :: x -> Variant (x : xs)
+--   There :: Variant xs -> Variant (x : xs)
 
-class CouldBe xs x  where
-  inject  :: x -> Variant xs
-  project :: Variant xs -> Maybe x
+-- class CouldBe xs x  where
+--   inject  :: x -> Variant xs
+--   project :: Variant xs -> Maybe x
 
-throw :: CouldBe xs x => x -> Variant xs
-throw = inject
+-- throw :: CouldBe xs x => x -> Variant xs
+-- throw = inject
 
-instance {-# OVERLAPS #-} CouldBe (x : xs) x where
-  inject :: x -> Variant (x : xs)
-  inject = Here
+-- instance {-# OVERLAPS #-} CouldBe (x : xs) x where
+--   inject :: x -> Variant (x : xs)
+--   inject = Here
 
-  project :: Variant (x : xs) -> Maybe x
-  project = \case
-    Here x -> Just x
-    There _variant -> Nothing
+--   project :: Variant (x : xs) -> Maybe x
+--   project = \case
+--     Here x -> Just x
+--     There _variant -> Nothing
 
-instance {-# OVERLAPPABLE #-} CouldBe xs y => CouldBe (x : xs) y where
-  inject :: CouldBe xs y => y -> Variant (x : xs)
-  inject y = There (inject y)
+-- instance {-# OVERLAPPABLE #-} CouldBe xs y => CouldBe (x : xs) y where
+--   inject :: CouldBe xs y => y -> Variant (x : xs)
+--   inject y = There (inject y)
 
-  project :: CouldBe xs y => Variant (x : xs) -> Maybe y
-  project = \case
-    Here _ -> Nothing
-    There variant -> project variant
+--   project :: CouldBe xs y => Variant (x : xs) -> Maybe y
+--   project = \case
+--     Here _ -> Nothing
+--     There variant -> project variant
