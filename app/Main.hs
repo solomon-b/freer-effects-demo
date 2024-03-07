@@ -3,7 +3,13 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE InstanceSigs #-}
 
 module Main where
 
@@ -16,11 +22,23 @@ import Control.Monad.Freer.Exception
 
 main :: IO ()
 main = do
-  result <- runM . runError . runLogger . runBlogPost . runUserModel $ runProgram
+  result <- interpreter runProgram
   case result of
-    Left (BlogPostError err) -> print err
+    Left _err -> print "error"
     Right _ -> pure ()
 
+type Errors = '[BlogPostError, UserModelError]
+
+interpreter :: Eff '[UserModel, BlogPost, Logger, Exc BlogPostError, Exc UserModelError, Exc (Variant Errors), IO] a -> IO (Either (Variant Errors) a)
+interpreter =
+    runM
+  . runError
+  . injectError @UserModelError @Errors
+  . injectError @BlogPostError @Errors
+  . runLogger
+  . runBlogPost
+  . runUserModel
+  
 --------------------------------------------------------------------------------
 -- Program
 
@@ -94,6 +112,7 @@ data BlogPost a where
   Unpublish :: PostId -> BlogPost ()
 
 newtype BlogPostError = BlogPostError String
+  deriving Show
 
 runBlogPost :: (Member IO r, Member (Exc BlogPostError) r) => Eff (BlogPost ': r) v -> Eff r v
 runBlogPost = simpleRelay $ \case
@@ -118,3 +137,38 @@ runLogger = simpleRelay $ \(Log msg) -> send $ print msg
 
 simpleRelay :: (forall a. t a -> Eff r a) -> Eff (t ': r) v -> Eff r v
 simpleRelay f = handleRelay return (\e arr -> arr =<< f e)
+
+mapError :: forall e1 e2 r a. Member (Exc e2) r => (e1 -> e2) -> Eff (Exc e1 ': r) a -> Eff r a 
+mapError f = simpleRelay $ \(Exc err) -> throwError (f err)
+
+injectError :: forall e es r a . (Member (Exc (Variant es)) r, CouldBe es e) => Eff (Exc e : r) a -> Eff r a
+injectError = mapError (throw :: e -> Variant es)
+
+data Variant xs where
+  Here  :: x -> Variant (x : xs)
+  There :: Variant xs -> Variant (x : xs)
+
+class CouldBe xs x  where
+  inject  :: x -> Variant xs
+  project :: Variant xs -> Maybe x
+
+throw :: CouldBe xs x => x -> Variant xs
+throw = inject
+
+instance {-# OVERLAPS #-} CouldBe (x : xs) x where
+  inject :: x -> Variant (x : xs)
+  inject = Here
+
+  project :: Variant (x : xs) -> Maybe x
+  project = \case
+    Here x -> Just x
+    There _variant -> Nothing
+
+instance {-# OVERLAPPABLE #-} CouldBe xs y => CouldBe (x : xs) y where
+  inject :: CouldBe xs y => y -> Variant (x : xs)
+  inject y = There (inject y)
+
+  project :: CouldBe xs y => Variant (x : xs) -> Maybe y
+  project = \case
+    Here _ -> Nothing
+    There variant -> project variant
